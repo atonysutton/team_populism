@@ -1,0 +1,152 @@
+# Load libraries
+
+library(tidyverse)
+library(lubridate)
+library(janitor)
+
+# Load and shape data ----
+pop <- read_csv('team_populism_prepared.csv', col_types = "ccccccdinfii") %>%
+  rename_all(tolower)
+
+skimr::skim(pop)
+
+pop <- pop %>% rename(populism_score = average_score)
+
+## arbitrarily set threshold to dichotomize "populism"
+pop_threshold = 0.75
+
+##rename last year of tenure for leaders still in office
+ ##leaders still in officer are coded as 1899; capture that info in new column
+summary(pop$year_end)
+pop$in_office <- if_else(pop$year_end == 1899, 1, 0)
+sum(pop$in_office)
+
+ ##for current leaders, set year_end to latest year of data
+pop_last <- max(pop$year_end)
+pop$year_end <- as.integer(if_else(pop$year_end == 1899, as.numeric(pop_last), as.numeric(pop$year_end)))
+summary(pop$year_end)
+
+##locate one row with impossible data: tenure ends before it begins
+pop %>% mutate(time_travel = year_end - year_begin) %>% filter(time_travel < 0) %>% select(year_begin, year_end, iso_code, country, leader)
+ ##manually change value to 2003, per external sources on Noboa's tenure
+pop$year_end <- if_else(pop$year_begin == 2000 & pop$iso_code == 'ECU',
+                        as.integer(2003),
+                        pop$year_end) 
+
+##recode into left-right-center
+pop <- pop %>% mutate(ideology = fct_recode(as.factor(left_right),
+                                            center = '0',
+                                            left = '-1',
+                                            right = '1'))
+
+## note length of tenure and number of terms ----
+pop <- pop %>% mutate(tenure = year_end - year_begin)
+
+pop <- pop %>% arrange(leader, year_begin)
+pop <- pop %>% group_by(leader) %>% mutate(total_terms = n()) %>% ungroup()
+
+
+pop[1, 'term_number'] <- 1
+for (i in 2:nrow(pop)){
+  pop[i, 'term_number'] <-
+    if_else(as.character(pop[i, 'leader']) == as.character(pop[(i-1), 'leader']),  #if the prior row is the same leader...
+            as.integer(pop[(i-1), 'term_number']) + 1,                             #...then count an additional term
+            1)
+}
+
+pop <- pop %>% arrange(leader, year_begin)
+pop[1, 'cumulative_tenure'] <- as.integer(pop[1, 'tenure'])
+for (i in 2:nrow(pop)){
+  pop[i, 'cumulative_tenure'] <-
+    if_else(as.integer(pop[i, 'term_number']) > 1,                                         #if multiple terms...
+            as.integer(pop[(i-1), 'cumulative_tenure']) + as.integer(pop[(i), 'tenure']),  #...then add combined tenure
+            as.integer(pop[i, 'tenure']))
+}
+
+
+## create second dataframe with one row per calendar year, columns of grouped statistics ----
+pop_first <- min(pop$year_begin)
+pop_by_year <- data.frame(year = c(pop_first:pop_last))  #start with one row for every year covered by Team Populism's dataset
+
+for(i in 1:nrow(pop_by_year)){
+  #for each year...
+  loop_year <- pop_by_year[i, 'year']
+  working_df <- pop %>% filter(loop_year >= year_begin & loop_year <= year_end)
+  
+  #count the number of countries in dataset
+  pop_by_year[i, 'countries'] <- n_distinct(working_df$iso_code)
+  
+  #note average populism score 
+  pop_by_year[i, 'populism_avg'] <- mean(working_df$populism_score, na.rm = TRUE)
+  
+  #count number of populists
+  pop_by_year[i, 'populists'] <- n_distinct(working_df$unique_id[working_df$populism_score >= pop_threshold])
+  
+  #note average tenure for all and for populists
+  working_df <- working_df %>% mutate(years_left_in_term = year_end - loop_year,
+                                      years_led = cumulative_tenure - years_left_in_term)
+  pop_by_year[i, 'tenure_avg'] <- mean(working_df$years_led, na.rm = TRUE)
+  pop_by_year[i, 'populist_tenure_avg'] <- mean(working_df$years_led[working_df$populism_score >= pop_threshold], na.rm = TRUE)
+  
+  #note ideological distribution of countries in dataset
+  pop_by_year[i, 'ideology_avg'] <- mean(working_df$left_right, na.rm = TRUE)
+  pop_by_year[i, 'countries_left'] <- n_distinct(working_df$iso_code[working_df$left_right == -1])
+  pop_by_year[i, 'countries_center'] <- n_distinct(working_df$iso_code[working_df$left_right == 0])
+  pop_by_year[i, 'countries_right'] <- n_distinct(working_df$iso_code[working_df$left_right == 1])
+  
+  #break out ideological distribution of populists
+  pop_by_year[i, 'populist_ideology_avg'] <- mean(working_df$left_right[working_df$populism_score >= pop_threshold], na.rm = TRUE)
+  pop_by_year[i, 'populists_left'] <- n_distinct(working_df$iso_code[working_df$left_right == -1 & working_df$populism_score >= pop_threshold])
+  pop_by_year[i, 'populists_center'] <- n_distinct(working_df$iso_code[working_df$left_right == 0 & working_df$populism_score >= pop_threshold])
+  pop_by_year[i, 'populists_right'] <- n_distinct(working_df$iso_code[working_df$left_right == 1 & working_df$populism_score >= pop_threshold])
+}
+
+
+## create third dataframe with one row per leader-year ----
+
+
+# visualize ----
+
+## show distribution of populism ----
+ggplot(data = pop, aes(x = populism_score))+
+  geom_histogram(binwidth = .1, fill = 'steelblue')+
+  theme_minimal()+
+  labs(title = "Populism of Leaders' Terms",
+       subtitle = 'as evident in political speeches',
+       x = 'Degree of Populism',
+       y = 'Number of Leader-Terms')+
+#  geom_vline(xintercept = 0.7, linetype = 'dashed', color = 'gray60')+
+#  annotate('text', x = .87, y = 25, label = 'A natural break\n to dichotomize\n populism', color = 'gray60')+
+  theme(plot.title = element_text(hjust = 0.5), 
+        plot.subtitle = element_text(hjust = 0.5),
+        title = element_text(size = 20),
+        axis.title = element_text(size = 18),
+        axis.title.y = element_text(margin = margin(r = 10)),
+        axis.text = element_text(size = 16),
+        panel.grid.minor = element_blank())
+
+ggsave(filename = "populism_distribution.jpg",
+       width = 10,
+       height = 6,
+       units = 'in')
+
+## show left-right balance over time 
+ggplot(data = pop_by_year, aes(x = year))+
+  geom_line(aes(y = ideology_avg), color = 'darkorange', size = 2)+
+  geom_line(aes(y = populist_ideology_avg), color = 'saddlebrown', size = 2)+
+  scale_x_continuous(limits = c(2001, 2019))+
+  coord_flip()+
+  theme_minimal()
+
+ggplot(data = pop_by_year, aes(x = year))+
+  geom_line(aes(y = populists_left / countries_left), color = 'forestgreen', size = 2)+
+  geom_line(aes(y = populists_center / countries_center), color = 'gray50', size = 2)+
+  geom_line(aes(y = populists_right / countries_right), color = 'dodgerblue', size = 2)+
+  theme_minimal()
+
+## show populists' tenure over time
+ggplot(data = pop_by_year, aes(x = year, y = populist_tenure_avg))+
+  geom_line(aes(y = tenure_avg), color = 'darkorange', size = 2)+
+  geom_line(aes(y = populist_tenure_avg), color = 'saddlebrown', size = 2)+
+  theme_minimal()
+ #note that the data are left-censored, so early tenures are artificially low
