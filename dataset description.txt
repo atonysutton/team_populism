@@ -1,0 +1,8 @@
+Downloaded from https://populism.byu.edu/Pages/Data
+ on 14 September 2020
+
+Website description:
+
+Prepared for The New Populism, a projects with The Guardian, this dataset measures the populist discourse of presidents and prime ministers from 40 countries around the globe between 2000 and 2018. Data points consists of a single, average score for each term of executive. Data were produced through holistic grading of political speeches. Compiled from previous datasets and from a new round of coding in fall 2018. Please cite the data as follows: Hawkins, Kirk A., Rosario Aguilar, Erin Jenne, Bojana Kocijan, Cristóbal Rovira Kaltwasser, Bruno Castanho Silva. 2019. Global Populism Database: Populism Dataset for Leaders 1.0. Available for download at populism.byu.edu
+
+team_populism_prepared.csv includes a column for ISO code that I added manually, referencing iso.org
